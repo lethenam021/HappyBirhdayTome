@@ -174,7 +174,33 @@
     @keyframes rise{0%{transform:translateY(0) scale(.9);opacity:.55}70%{opacity:.15}100%{transform:translateY(-36px) scale(1.3);opacity:0}}
   </style>
 </head>
-<body>
+<body><!-- Gate (trước ngày sinh nhật hoặc chưa nhập mã) -->
+<section id="gate" style="display:none; text-align:center; margin:40px;">
+  <p id="countdown1" style="margin:10px 0;">⏳ Đang đếm ngược...</p>
+  <p style="opacity:.8;margin:0 0 16px">Đến đúng 22/09 trang sẽ tự mở. Hoặc nhập mã để vào ngay:</p>
+
+  <!-- Dots kiểu iPhone -->
+  <div id="dots" style="display:flex; justify-content:center; gap:12px; margin:16px 0;">
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+    <div class="dot"></div>
+
+  </div>
+
+  <!-- Bàn phím số -->
+  <div id="numpad" style="display:grid; grid-template-columns:repeat(3,80px); gap:12px; justify-content:center;">
+    <button class="num">1</button><button class="num">2</button><button class="num">3</button>
+    <button class="num">4</button><button class="num">5</button><button class="num">6</button>
+    <button class="num">7</button><button class="num">8</button><button class="num">9</button>
+    <button class="num">⌫</button><button class="num">0</button><button class="num">✔</button>
+  </div>
+
+  <p id="msg" style="margin-top:12px; color:red; height:20px;"></p>
+</section>
+<main id="app" style="display:none; text-align:center; margin:40px;">
   <div class="orb"></div>
   <div class="orb orb2"></div>
   <canvas id="confetti"></canvas>
@@ -340,9 +366,207 @@
     </div>
   </section>
 
-  <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js"></script>
+  <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
+    <button id="logout">Thoát</button>
+    <button id="logout-force">Thoát & khóa tạm</button>
+  </div>
+</main>
+
+<style>
+.dot{ width:18px;height:18px;border-radius:50%;border:2px solid #333 }
+.dot.filled{ background:#333 }
+#numpad button{ font-size:20px;padding:20px;border-radius:50%;border:none;background:#eee;cursor:pointer }
+#numpad button:active{ background:#ddd }
+.shake{ animation:shake .3s }
+@keyframes shake{0%{transform:translateX(0)}25%{transform:translateX(-5px)}50%{transform:translateX(5px)}75%{transform:translateX(-5px)}100%{transform:translateX(0)}}
+</style>
+ <script src="https://cdn.jsdelivr.net/npm/qrcodejs/qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
-  <script>
+<script>
+// ================== CONFIG ==================
+
+// ================== TIME UTILS ==================
+function ymdInTZ(date=new Date(), tz=CONFIG.tz){
+  const fmt = new Intl.DateTimeFormat('en-CA',{timeZone:tz,year:'numeric',month:'2-digit',day:'2-digit'});
+  const [y,m,d] = fmt.format(date).split('-').map(Number);
+  return {y,m,d};
+}
+function parseBirthdayYMD(){
+  const d = new Date(CONFIG.birthday);
+  return ymdInTZ(d, CONFIG.tz);
+}
+function isBirthdayToday(){
+  const today = ymdInTZ(new Date(), CONFIG.tz);
+  const b = parseBirthdayYMD();
+  return today.y===b.y && today.m===b.m && today.d===b.d;
+}
+
+// ================== VIEW HELPERS ==================
+function show(el){ el.style.display='block'; }
+function hide(el){ el.style.display='none'; }
+
+function openApp(persist=true){
+  if(persist) localStorage.setItem(CONFIG.rememberKey,'1');
+  hide(document.getElementById('gate'));
+  show(document.getElementById('app'));
+}
+
+// ================== COUNTDOWN ==================
+let countdownTimer1; // chỉ khai báo 1 lần
+
+function updateCountdown1(){
+  const el = document.getElementById('countdown1');
+  if (!el) return; // nếu chưa có element thì bỏ qua
+
+  const target = new Date(CONFIG.birthday);   // đảm bảo CONFIG.birthday hợp lệ
+  if (isNaN(target.getTime())) { 
+    el.textContent = ''; 
+    return; 
+  }
+
+  const now = new Date();
+  const diff = target - now;
+
+  // Nếu tới ngày sinh nhật → hiển thị + dừng đếm + (nếu có) mở app
+  if ((typeof isBirthdayToday === 'function' && isBirthdayToday()) || diff <= 0){
+    el.textContent = '🎉 Hôm nay là sinh nhật!';
+    if (countdownTimer1) clearInterval(countdownTimer1);
+    if (typeof shouldForceGate === 'function' && !shouldForceGate()) {
+      openApp(false);
+    }
+    return;
+  }
+
+  const d = Math.floor(diff / 86400000);
+  const h = Math.floor(diff / 3600000) % 24;
+  const m = Math.floor(diff / 60000) % 60;
+  el.textContent = `⏳ Đếm ngược còn ${d} ngày ${h} giờ ${m} phút `;
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  updateCountdown1();
+  countdownTimer1 = setInterval(updateCountdown1, 60000);
+});
+
+// ================== PIN KEYPAD ==================
+let inputCode = "";
+function renderDots(){
+  const dots = document.querySelectorAll('.dot');
+  dots.forEach((d,i)=>{
+    if(i < inputCode.length) d.classList.add('filled');
+    else d.classList.remove('filled');
+  });
+}
+function wrongCode(){
+  document.getElementById('msg').textContent = "Sai mã, thử lại!";
+  const dots = document.getElementById('dots');
+  dots.classList.add('shake');
+  setTimeout(()=>dots.classList.remove('shake'),300);
+  inputCode = "";
+  renderDots();
+}
+function checkCode(){
+  if(inputCode === CONFIG.code) openApp(); else wrongCode();
+}
+
+// ================== INIT ==================
+document.addEventListener('DOMContentLoaded', ()=>{
+  // Nếu đã từng mở rồi → vào luôn
+  if(localStorage.getItem(CONFIG.rememberKey)==='1' || isBirthdayToday()){
+    openApp(false);
+  } else {
+    show(document.getElementById('gate'));
+  }
+
+  // Countdown: chạy ngay và mỗi phút
+  updateCountdown();
+  countdownTimer = setInterval(updateCountdown, 60000);
+
+  // Numpad events
+  document.querySelectorAll('#numpad .num').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const val = btn.textContent.trim();
+      if(val === "⌫"){
+        inputCode = inputCode.slice(0,-1);
+        renderDots();
+      } else if(val === "✔"){
+        if(inputCode.length === CONFIG.code.length) checkCode();
+      } else {
+        if(inputCode.length < CONFIG.code.length){
+          inputCode += val;
+          renderDots();
+          if(inputCode.length === CONFIG.code.length) checkCode();
+        }
+      }
+    });
+  });
+
+  // Cho phép nhập bằng bàn phím vật lý (0-9, Backspace, Enter)
+  window.addEventListener('keydown',(e)=>{
+    if(document.getElementById('gate').style.display==='none') return;
+    if(/^\d$/.test(e.key)){
+      if(inputCode.length < CONFIG.code.length){
+        inputCode += e.key;
+        renderDots();
+        if(inputCode.length === CONFIG.code.length) checkCode();
+      }
+    } else if(e.key === 'Backspace'){
+      inputCode = inputCode.slice(0,-1);
+      renderDots();
+    } else if(e.key === 'Enter'){
+      if(inputCode.length === CONFIG.code.length) checkCode();
+    }
+  });
+});
+
+// Cho phép "ép gate" cả khi tới 22/09 (khóa tạm theo phiên)
+const FORCE_KEY = 'force_gate';
+
+// Thay openApp như cũ, giữ nguyên:
+function openApp(persist=true){
+  if(persist) localStorage.setItem(CONFIG.rememberKey,'1');
+  document.getElementById('gate').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+}
+
+// Sửa nhẹ logic auto mở: nếu đang "force gate" thì KHÔNG tự mở
+function shouldForceGate() {
+  return sessionStorage.getItem(FORCE_KEY) === '1';
+}
+
+// Trong init (DOMContentLoaded), thay đoạn quyết định mở app/gate:
+document.addEventListener('DOMContentLoaded', ()=>{
+  // hỗ trợ ?logout=1 để reset nhanh qua link
+  const qp = new URLSearchParams(location.search);
+  if (qp.get('logout') === '1') {
+    localStorage.removeItem(CONFIG.rememberKey);
+    sessionStorage.setItem(FORCE_KEY,'1'); // ép gate sau khi reset
+  }
+
+  if (!shouldForceGate() && (localStorage.getItem(CONFIG.rememberKey)==='1' || isBirthdayToday())){
+    openApp(false);
+  } else {
+    document.getElementById('gate').style.display = 'block';
+  }
+
+  // Countdown như cũ, nhưng nếu đang force gate thì không tự mở
+  updateCountdown();
+  countdownTimer = setInterval(updateCountdown, 60000);
+
+  // Nút Thoát
+  document.getElementById('logout')?.addEventListener('click', ()=>{
+    localStorage.removeItem(CONFIG.rememberKey);
+    sessionStorage.removeItem(FORCE_KEY); // không ép, để logic bình thường
+    location.reload();
+  });
+
+  // Nút Thoát & khóa tạm (ép gate ngay cả ngày 22/09)
+  document.getElementById('logout-force')?.addEventListener('click', ()=>{
+    localStorage.removeItem(CONFIG.rememberKey);
+    sessionStorage.setItem(FORCE_KEY,'1');
+    location.reload();
+  });
+});
   // ===== Helpers =====
   const $ = sel => document.querySelector(sel);
   const $$ = sel => Array.from(document.querySelectorAll(sel));
@@ -356,7 +580,10 @@
   const CONFIG = {
     recipientName: params.get('name') || 'Lê Thê Nam',
     author: params.get('author') || 'Gia đình & Bạn bè',
-    birthday: params.get('birthday') || '2025-09-17T16:41:00',
+    birthday: params.get('birthday') || '2025-09-22',
+     tz: "Asia/Bangkok",
+  code: "682004",            // 🔒 PIN mở sớm
+  rememberKey: "nam_bday_access",
     messageLines: (params.get('msg') ? decodeURIComponent(params.get('msg')).split('\n') : [
       'Chúc tuổi mới luôn mạnh khỏe và mỉm cười mỗi ngày!',
       'Mong mọi dự định đều thành công rực rỡ.',
@@ -438,7 +665,6 @@ scheduleFireworks();
 
   
  // ===== Countdown =====
-let countdownTimer; // giữ id interval để clear khi cần
 
 function updateCountdown(){
   const target = new Date(CONFIG.birthday);
@@ -674,6 +900,7 @@ $('#btnUnlock').addEventListener("click", () => {
   renderGB();
   $('#btnConfetti').setAttribute('aria-label','Bắn confetti'); $('#btnFireworks').setAttribute('aria-label','Pháo hoa');
   try{ const qp=new URLSearchParams(location.search); qp.set('name', CONFIG.recipientName); qp.set('author', CONFIG.author); qp.set('birthday', CONFIG.birthday); history.replaceState({}, '', `${location.pathname}?${qp.toString()}`); }catch{}
-  </script>
+
+</script>
 </body>
 </html>
